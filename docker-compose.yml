@@ -1,0 +1,128 @@
+services:
+  nginx:
+    container_name: nginx_${PROJECT_NAME}
+    build:
+      context: .
+      dockerfile: ./dockerfiles/nginx.dockerfile
+      args:
+        - UID=${UID:-1000}
+        - GID=${GID:-1000}
+        - PROJECT_NAME=${PROJECT_NAME}
+    ports:
+      - "${FORWARD_NGINX_PORT:-80}:80"
+    volumes:
+      - ./src:/var/www/html:delegated
+    depends_on:
+      - php
+      - redis
+      - mysql
+    networks:
+      - app_network
+    restart: unless-stopped
+  mysql:
+    image: mysql:8.4.0
+    container_name: mysql_${PROJECT_NAME}
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql:/var/lib/mysql/
+      - ./services_config/mysql_service/my.cnf:/etc/mysql/my.cnf
+    ports:
+      - "${FORWARD_DB_PORT:-3306}:3306"
+    networks:
+      - app_network
+    restart: unless-stopped
+  php:
+    container_name: php_${PROJECT_NAME}
+    build:
+      context: .
+      dockerfile: ./dockerfiles/php.dockerfile
+      args:
+        - UID=${UID:-1000}
+        - GID=${GID:-1000}
+        - PROJECT_NAME=${PROJECT_NAME}
+    ports:
+      - "${FORWARD_PHP_PORT:-9000}:9000"
+    volumes:
+      - ./src:/var/www/html:delegated
+      - ./services_config/app_service/custom.ini:/usr/local/etc/php/conf.d/custom.ini
+#      - ./dockerfiles/configs/xdebug.ini:/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - app_network
+    restart: unless-stopped
+  redis:
+    container_name: redis_${PROJECT_NAME}
+    image: redis:alpine
+    ports:
+      - "${FORWARD_REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      retries: 3
+      timeout: 5s
+    networks:
+      - app_network
+    restart: unless-stopped
+  composer:
+    container_name: composer_${PROJECT_NAME}
+    build:
+      context: .
+      dockerfile: ./dockerfiles/php.dockerfile
+      args:
+        - UID=${UID:-1000}
+        - GID=${GID:-1000}
+        - PROJECT_NAME=${PROJECT_NAME}
+    volumes:
+      - ./src:/var/www/html
+    depends_on:
+      - php
+    entrypoint: [ "composer" ]
+    networks:
+      - app_network
+  npm:
+    container_name: npm_${PROJECT_NAME}
+    image: node:18.20-alpine
+    volumes:
+      - ./src:/var/www/html
+    ports:
+      - "${FORWARD_NPM_PORT:-3000}:3000"
+    working_dir: /var/www/html
+    entrypoint: [ "npm" ]
+    networks:
+      - app_network
+  artisan:
+    container_name: artisan_${PROJECT_NAME}
+    build:
+      context: .
+      dockerfile: ./dockerfiles/php.dockerfile
+      args:
+        - UID=${UID:-1000}
+        - GID=${GID:-1000}
+        - PROJECT_NAME=${PROJECT_NAME}
+    volumes:
+      - ./src:/var/www/html:delegated
+    depends_on:
+      - mysql
+      - redis
+    entrypoint: [ "php", "/var/www/html/artisan" ]
+    networks:
+      - app_network
+
+volumes:
+  mysql:
+    name: mysql_volume_${PROJECT_NAME}
+    driver: local
+  redis:
+    name: redis_volume_${PROJECT_NAME}
+    driver: local
+
+networks:
+  app_network:
+    name: network_${PROJECT_NAME}
+    driver: bridge
